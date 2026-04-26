@@ -169,7 +169,6 @@ function renderAttachmentsList(attachments) {
 // ── EVENT FORM ──
 export function showEventForm(itemId, existing, onSave) {
   const isEdit = !!existing
-  const { showModal, closeModal, EVENT_TYPES, EVENT_STATUSES } = require('../utils.js')
 
   import('../utils.js').then(({ showModal, closeModal, EVENT_TYPES, EVENT_STATUSES, showToast }) => {
     showModal(`
