@@ -3,10 +3,11 @@ import { formatDate, formatCurrency, warrantyStatus, CATEGORY_LABELS, EVENT_TYPE
 import { navigate } from '../main.js'
 
 export async function renderItemDetail(container, itemId) {
-  const [{ data: item }, { data: events }, { data: attachments }] = await Promise.all([
+  const [{ data: item }, { data: events }, { data: attachments }, { data: contacts }] = await Promise.all([
     supabase.from('items').select('*').eq('id', itemId).single(),
     supabase.from('events').select('*').eq('item_id', itemId).order('event_date', { ascending: false }),
-    supabase.from('attachments').select('*').eq('item_id', itemId)
+    supabase.from('attachments').select('*').eq('item_id', itemId),
+    supabase.from('contacts').select('*').eq('item_id', itemId).order('created_at')
   ])
 
   if (!item) { container.innerHTML = '<div class="empty-state"><h3>Bene non trovato</h3></div>'; return }
@@ -49,6 +50,17 @@ export async function renderItemDetail(container, itemId) {
         </div>` : ''}
     </div>
 
+    <!-- CONTATTI -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">📞 Contatti</span>
+        <button class="btn btn-primary btn-sm" id="btn-add-contact">+ Aggiungi contatto</button>
+      </div>
+      <div id="contacts-container">
+        ${renderContactsList(contacts || [])}
+      </div>
+    </div>
+
     <!-- EVENTI -->
     <div class="card">
       <div class="card-header">
@@ -72,21 +84,27 @@ export async function renderItemDetail(container, itemId) {
     </div>
   `
 
-  // Back
   document.getElementById('btn-back').addEventListener('click', () => navigate('items'))
-
-  // Edit item
   document.getElementById('btn-edit-item').addEventListener('click', () => {
     import('./itemForm.js').then(m => m.showItemForm(item, () => navigate('detail', itemId)))
   })
-
-  // Delete item
   document.getElementById('btn-delete-item').addEventListener('click', () => confirmDeleteItem(item, itemId))
-
-  // Add event
   document.getElementById('btn-add-event').addEventListener('click', () => showEventForm(itemId, null, () => navigate('detail', itemId)))
+  document.getElementById('btn-add-contact').addEventListener('click', () => showContactForm(itemId, null, () => navigate('detail', itemId)))
 
-  // Edit/delete events
+  container.querySelectorAll('[data-edit-contact]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation()
+      const ct = (contacts || []).find(x => x.id === btn.dataset.editContact)
+      if (ct) showContactForm(itemId, ct, () => navigate('detail', itemId))
+    })
+  })
+  container.querySelectorAll('[data-delete-contact]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation()
+      confirmDeleteContact(btn.dataset.deleteContact, () => navigate('detail', itemId))
+    })
+  })
   container.querySelectorAll('[data-edit-event]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation()
@@ -100,11 +118,7 @@ export async function renderItemDetail(container, itemId) {
       confirmDeleteEvent(btn.dataset.deleteEvent, () => navigate('detail', itemId))
     })
   })
-
-  // Attachment upload
   document.getElementById('btn-add-attachment').addEventListener('click', () => showAttachmentUpload(itemId, () => navigate('detail', itemId)))
-
-  // Delete attachments
   container.querySelectorAll('[data-delete-attachment]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation()
@@ -116,6 +130,119 @@ export async function renderItemDetail(container, itemId) {
 function infoRow(label, value) {
   if (!value || value === '—') return ''
   return `<div class="info-item"><div class="info-label">${label}</div><div class="info-value">${value}</div></div>`
+}
+
+const CONTACT_TYPE_LABELS = {
+  assistenza: '🔧 Assistenza',
+  rivenditore: '🏪 Rivenditore',
+  tecnico: '👷 Tecnico',
+  garanzia: '🛡️ Garanzia',
+  emergenza: '🚨 Emergenza',
+  altro: '📋 Altro'
+}
+
+function renderContactsList(contacts) {
+  if (contacts.length === 0) return `
+    <div class="empty-state" style="padding:30px">
+      <div class="empty-state-icon">📞</div>
+      <p>Nessun contatto registrato</p>
+    </div>`
+
+  return `<div style="display:flex;flex-direction:column;gap:10px">${contacts.map(ct => `
+    <div style="padding:14px 16px;background:var(--cream);border-radius:8px;border-left:3px solid var(--terracotta)">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+            <span style="font-weight:600;font-size:0.95rem">${ct.name}</span>
+            <span class="badge badge-neutral" style="font-size:0.7rem">${CONTACT_TYPE_LABELS[ct.type] || ct.type}</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:3px">
+            ${ct.phone ? `<div style="font-size:0.875rem">📱 <a href="tel:${ct.phone}" style="color:var(--terracotta);text-decoration:none;font-weight:500">${ct.phone}</a></div>` : ''}
+            ${ct.email ? `<div style="font-size:0.875rem">✉️ <a href="mailto:${ct.email}" style="color:var(--terracotta);text-decoration:none">${ct.email}</a></div>` : ''}
+            ${ct.address ? `<div style="font-size:0.875rem">📍 ${ct.address}</div>` : ''}
+            ${ct.notes ? `<div style="font-size:0.8rem;color:var(--text-light);margin-top:4px">📝 ${ct.notes}</div>` : ''}
+          </div>
+        </div>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+          <button class="btn-icon" data-edit-contact="${ct.id}" title="Modifica">✏️</button>
+          <button class="btn-icon" data-delete-contact="${ct.id}" title="Elimina">🗑️</button>
+        </div>
+      </div>
+    </div>`).join('')}</div>`
+}
+
+export function showContactForm(itemId, existing, onSave) {
+  const isEdit = !!existing
+  import('../utils.js').then(({ showModal, closeModal, showToast }) => {
+    showModal(`
+      <div class="modal">
+        <div class="modal-header">
+          <span class="modal-title">${isEdit ? '✏️ Modifica contatto' : '+ Nuovo contatto'}</span>
+          <button class="btn-icon" id="modal-close">✕</button>
+        </div>
+        <div class="form-grid">
+          <div class="form-group full">
+            <label>Nome / Ragione sociale *</label>
+            <input type="text" id="ct-name" placeholder="Es: Assistenza Samsung, Mario Rossi Tecnico..." value="${existing?.name || ''}">
+          </div>
+          <div class="form-group">
+            <label>Tipo contatto</label>
+            <select id="ct-type">
+              <option value="assistenza" ${existing?.type === 'assistenza' ? 'selected' : ''}>🔧 Assistenza</option>
+              <option value="rivenditore" ${existing?.type === 'rivenditore' ? 'selected' : ''}>🏪 Rivenditore</option>
+              <option value="tecnico" ${existing?.type === 'tecnico' ? 'selected' : ''}>👷 Tecnico</option>
+              <option value="garanzia" ${existing?.type === 'garanzia' ? 'selected' : ''}>🛡️ Garanzia</option>
+              <option value="emergenza" ${existing?.type === 'emergenza' ? 'selected' : ''}>🚨 Emergenza</option>
+              <option value="altro" ${existing?.type === 'altro' ? 'selected' : ''}>📋 Altro</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Telefono</label>
+            <input type="tel" id="ct-phone" placeholder="Es: 049 1234567" value="${existing?.phone || ''}">
+          </div>
+          <div class="form-group full">
+            <label>Email</label>
+            <input type="email" id="ct-email" placeholder="Es: assistenza@samsung.com" value="${existing?.email || ''}">
+          </div>
+          <div class="form-group full">
+            <label>Indirizzo</label>
+            <input type="text" id="ct-address" placeholder="Es: Via Roma 1, Chioggia (VE)" value="${existing?.address || ''}">
+          </div>
+          <div class="form-group full">
+            <label>Note</label>
+            <textarea id="ct-notes" placeholder="Orari, informazioni utili...">${existing?.notes || ''}</textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="modal-cancel">Annulla</button>
+          <button class="btn btn-primary" id="modal-save">💾 Salva</button>
+        </div>
+      </div>
+    `, () => {
+      document.getElementById('modal-close').addEventListener('click', closeModal)
+      document.getElementById('modal-cancel').addEventListener('click', closeModal)
+      document.getElementById('modal-save').addEventListener('click', async () => {
+        const name = document.getElementById('ct-name').value.trim()
+        if (!name) { showToast('Inserisci il nome del contatto', 'error'); return }
+        const payload = {
+          item_id: itemId,
+          name,
+          type: document.getElementById('ct-type').value,
+          phone: document.getElementById('ct-phone').value.trim() || null,
+          email: document.getElementById('ct-email').value.trim() || null,
+          address: document.getElementById('ct-address').value.trim() || null,
+          notes: document.getElementById('ct-notes').value.trim() || null
+        }
+        const { error } = isEdit
+          ? await supabase.from('contacts').update(payload).eq('id', existing.id)
+          : await supabase.from('contacts').insert(payload)
+        if (error) { showToast('Errore: ' + error.message, 'error'); return }
+        showToast(isEdit ? 'Contatto aggiornato' : 'Contatto aggiunto')
+        closeModal()
+        if (onSave) onSave()
+      })
+    })
+  })
 }
 
 function renderEventsList(events) {
@@ -166,10 +293,8 @@ function renderAttachmentsList(attachments) {
     </div>`).join('')}</div>`
 }
 
-// ── EVENT FORM ──
 export function showEventForm(itemId, existing, onSave) {
   const isEdit = !!existing
-
   import('../utils.js').then(({ showModal, closeModal, EVENT_TYPES, EVENT_STATUSES, showToast }) => {
     showModal(`
       <div class="modal">
@@ -239,7 +364,6 @@ export function showEventForm(itemId, existing, onSave) {
   })
 }
 
-// ── ATTACHMENT UPLOAD ──
 function showAttachmentUpload(itemId, onSave) {
   import('../utils.js').then(({ showModal, closeModal, showToast }) => {
     showModal(`
@@ -270,19 +394,13 @@ function showAttachmentUpload(itemId, onSave) {
         const file = document.getElementById('att-file').files[0]
         const name = document.getElementById('att-name').value.trim() || file?.name || 'Documento'
         if (!file) { showToast('Seleziona un file PDF', 'error'); return }
-
         const filePath = `${itemId}/${Date.now()}_${file.name}`
         const { error: uploadError } = await supabase.storage.from('attachments').upload(filePath, file)
         if (uploadError) { showToast('Errore upload: ' + uploadError.message, 'error'); return }
-
         const { data: urlData } = supabase.storage.from('attachments').getPublicUrl(filePath)
-
         const { error } = await supabase.from('attachments').insert({
-          item_id: itemId,
-          file_name: name,
-          file_path: filePath,
-          file_url: urlData.publicUrl,
-          file_size: file.size
+          item_id: itemId, file_name: name, file_path: filePath,
+          file_url: urlData.publicUrl, file_size: file.size
         })
         if (error) { showToast('Errore salvataggio: ' + error.message, 'error'); return }
         showToast('Documento caricato!')
@@ -293,7 +411,6 @@ function showAttachmentUpload(itemId, onSave) {
   })
 }
 
-// ── DELETE HELPERS ──
 function confirmDeleteItem(item, itemId) {
   import('../utils.js').then(({ showModal, closeModal, showToast }) => {
     showModal(`
@@ -302,7 +419,7 @@ function confirmDeleteItem(item, itemId) {
           <span class="modal-title">🗑️ Elimina bene</span>
           <button class="btn-icon" id="modal-close">✕</button>
         </div>
-        <p style="margin-bottom:20px">Sei sicuro di voler eliminare <strong>${item.name}</strong>? Verranno eliminati anche tutti gli eventi e i documenti allegati. Questa azione non è reversibile.</p>
+        <p style="margin-bottom:20px">Sei sicuro di voler eliminare <strong>${item.name}</strong>? Verranno eliminati anche tutti gli eventi, i contatti e i documenti allegati. Questa azione non è reversibile.</p>
         <div class="modal-footer">
           <button class="btn btn-secondary" id="modal-cancel">Annulla</button>
           <button class="btn btn-danger" id="modal-confirm">🗑️ Elimina</button>
@@ -314,6 +431,7 @@ function confirmDeleteItem(item, itemId) {
       document.getElementById('modal-confirm').addEventListener('click', async () => {
         await supabase.from('events').delete().eq('item_id', itemId)
         await supabase.from('attachments').delete().eq('item_id', itemId)
+        await supabase.from('contacts').delete().eq('item_id', itemId)
         const { error } = await supabase.from('items').delete().eq('id', itemId)
         if (error) { showToast('Errore: ' + error.message, 'error'); return }
         showToast('Bene eliminato')
@@ -330,6 +448,16 @@ function confirmDeleteEvent(eventId, onDone) {
     const { error } = await supabase.from('events').delete().eq('id', eventId)
     if (error) { showToast('Errore: ' + error.message, 'error'); return }
     showToast('Evento eliminato')
+    if (onDone) onDone()
+  })
+}
+
+function confirmDeleteContact(contactId, onDone) {
+  import('../utils.js').then(async ({ showToast }) => {
+    if (!confirm('Eliminare questo contatto?')) return
+    const { error } = await supabase.from('contacts').delete().eq('id', contactId)
+    if (error) { showToast('Errore: ' + error.message, 'error'); return }
+    showToast('Contatto eliminato')
     if (onDone) onDone()
   })
 }
