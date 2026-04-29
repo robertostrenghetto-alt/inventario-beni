@@ -394,9 +394,13 @@ function showAttachmentUpload(itemId, onSave) {
         const file = document.getElementById('att-file').files[0]
         const name = document.getElementById('att-name').value.trim() || file?.name || 'Documento'
         if (!file) { showToast('Seleziona un file PDF', 'error'); return }
-        const filePath = `${itemId}/${Date.now()}_${file.name}`
-        const { error: uploadError } = await supabase.storage.from('attachments').upload(filePath, file)
-        if (uploadError) { showToast('Errore upload: ' + uploadError.message, 'error'); return }
+        const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')
+const filePath = `${itemId}/${Date.now()}_${safeName}`
+const { error: uploadError } = await supabase.storage.from('attachments').upload(filePath, file, {
+  contentType: file.type || 'application/pdf',
+  upsert: false
+})
+  if (uploadError) { showToast('Errore upload: ' + uploadError.message, 'error'); return }
         const { data: urlData } = supabase.storage.from('attachments').getPublicUrl(filePath)
         const { error } = await supabase.from('attachments').insert({
           item_id: itemId, file_name: name, file_path: filePath,
