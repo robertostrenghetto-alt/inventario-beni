@@ -392,6 +392,7 @@ function showAttachmentUpload(itemId, onSave) {
       document.getElementById('modal-cancel').addEventListener('click', closeModal)
       document.getElementById('modal-save').addEventListener('click', async () => {
         const file = document.getElementById('att-file').files[0]
+        alert('Files count: ' + document.getElementById('att-file').files.length)
         const name = document.getElementById('att-name').value.trim() || file?.name || 'Documento'
         if (!file) { showToast('Seleziona un file PDF', 'error'); return }
         alert('File: ' + file.name + ' - size: ' + file.size + ' - type: ' + file.type)
