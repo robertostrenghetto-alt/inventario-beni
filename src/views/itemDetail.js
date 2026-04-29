@@ -400,7 +400,7 @@ const { error: uploadError } = await supabase.storage.from('attachments').upload
   contentType: file.type || 'application/pdf',
   upsert: false
 })
-  if (uploadError) { showToast('Errore upload: ' + uploadError.message, 'error'); return }
+  if (uploadError) { alert('Errore upload: ' + JSON.stringify(uploadError)); return }
         const { data: urlData } = supabase.storage.from('attachments').getPublicUrl(filePath)
         const { error } = await supabase.from('attachments').insert({
           item_id: itemId, file_name: name, file_path: filePath,
