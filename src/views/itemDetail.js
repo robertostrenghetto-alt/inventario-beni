@@ -393,9 +393,18 @@ function showAttachmentUpload(itemId, onSave) {
       document.getElementById('modal-save').addEventListener('click', async () => {
         const file = document.getElementById('att-file').files[0]
         const name = document.getElementById('att-name').value.trim() || file?.name || 'Documento'
-        if (!file) { showToast('Seleziona un file PDF', 'error'); return }
-        const filePath = `${itemId}/${Date.now()}_${file.name}`
-        const { error: uploadError } = await supabase.storage.from('attachments').upload(filePath, file)
+        if (!file) { showToast('Seleziona un file', 'error'); return }
+        const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')
+        const filePath = `${itemId}/${Date.now()}_${safeName}`
+        const arrayBuffer = await new Promise((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = e => resolve(e.target.result)
+          reader.onerror = e => reject(e)
+          reader.readAsArrayBuffer(file)
+        })
+        const uint8Array = new Uint8Array(arrayBuffer)
+        const contentType = file.type || 'application/octet-stream'
+        const { error: uploadError } = await supabase.storage.from('attachments').upload(filePath, uint8Array, { contentType, upsert: false })
         if (uploadError) { showToast('Errore upload: ' + uploadError.message, 'error'); return }
         const { data: urlData } = supabase.storage.from('attachments').getPublicUrl(filePath)
         const { error } = await supabase.from('attachments').insert({
